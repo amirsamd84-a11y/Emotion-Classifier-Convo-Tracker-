@@ -1,5 +1,6 @@
 import gradio as gr
 from transformers import pipeline
+import os
 
 MODEL_REPO = "TrunkSam/support-emotion-classifier"
 
@@ -20,4 +21,7 @@ demo = gr.Interface(
 )
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)))
+
+
+
