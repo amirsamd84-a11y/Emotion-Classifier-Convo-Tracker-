@@ -1,0 +1,10 @@
+transformers>=4.57.0
+datasets>=5.0.0
+evaluate
+accelerate
+torch
+scikit-learn
+matplotlib
+seaborn
+gradio
+huggingface-hub<1.0
