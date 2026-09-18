@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from transformers import pipeline
+
+from ollama_classifier import classify
 
 
 NEGATIVE_EMOTIONS = {"anger", "sadness", "fear"}
@@ -10,9 +11,7 @@ NEGATIVE_EMOTIONS = {"anger", "sadness", "fear"}
 class MessageResult:
     text: str
     timestamp: datetime
-    scores: dict
     top_emotion: str
-    negative_score: float
 
 
 @dataclass
@@ -22,8 +21,8 @@ class Session:
 
 
 class ConversationTracker:
-    def __init__(self, model_repo="TrunkSam/support-emotion-classifier"):
-        self.classifier = pipeline("text-classification", model=model_repo, top_k=None)
+    def __init__(self, model="llama3.2:3b"):
+        self.model = model
         self.sessions = {}
 
     def _get_session(self, session_id):
@@ -33,18 +32,9 @@ class ConversationTracker:
 
     def add_message(self, session_id, text, timestamp=None):
         timestamp = timestamp or datetime.now()
-        raw = self.classifier(text)[0]
-        scores = {r["label"]: r["score"] for r in raw}
-        top_emotion = max(scores, key=scores.get)
-        negative_score = sum(scores[e] for e in NEGATIVE_EMOTIONS)
+        top_emotion = classify(text, model=self.model)
 
-        result = MessageResult(
-            text=text,
-            timestamp=timestamp,
-            scores=scores,
-            top_emotion=top_emotion,
-            negative_score=negative_score,
-        )
+        result = MessageResult(text=text, timestamp=timestamp, top_emotion=top_emotion)
 
         session = self._get_session(session_id)
         session.history.append(result)
@@ -52,22 +42,40 @@ class ConversationTracker:
 
     def get_trajectory(self, session_id):
         session = self._get_session(session_id)
-        return [(r.timestamp, r.top_emotion, round(r.negative_score, 3)) for r in session.history]
+        return [(r.timestamp, r.top_emotion) for r in session.history]
 
     def get_trend(self, session_id):
         session = self._get_session(session_id)
-        scores = [r.negative_score for r in session.history]
+        negatives = [1 if r.top_emotion in NEGATIVE_EMOTIONS else 0 for r in session.history]
 
-        if len(scores) < 2:
+        if len(negatives) < 2:
             return "not_enough_data"
 
-        delta = scores[-1] - scores[0]
+        delta = negatives[-1] - negatives[0]
 
-        if delta > 0.2:
+        if delta > 0:
             return "escalating"
-        if delta < -0.2:
+        if delta < 0:
             return "de-escalating"
         return "stable"
+
+    def export_session(self, session_id):
+        session = self._get_session(session_id)
+        return [
+            {
+                "session_id": session_id,
+                "timestamp": r.timestamp.isoformat(),
+                "text": r.text,
+                "top_emotion": r.top_emotion,
+            }
+            for r in session.history
+        ]
+
+    def export_all(self):
+        rows = []
+        for session_id in self.sessions:
+            rows.extend(self.export_session(session_id))
+        return rows
 
 
 if __name__ == "__main__":
@@ -82,7 +90,7 @@ if __name__ == "__main__":
     for msg in messages:
         tracker.add_message("session_1", msg)
 
-    for timestamp, emotion, negative_score in tracker.get_trajectory("session_1"):
-        print(timestamp, emotion, negative_score)
+    for timestamp, emotion in tracker.get_trajectory("session_1"):
+        print(timestamp, emotion)
 
     print("Trend:", tracker.get_trend("session_1"))
